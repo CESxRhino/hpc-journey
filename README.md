@@ -64,17 +64,18 @@ A comprehensive repository covering theoretical foundations, hardware-aware opti
 
 An empirical progression optimizing single-precision General Matrix Multiplication (GEMM, $C = A \times B + C$) with matrix dimensions $M = N = K = 2048$:
 
+```text
 01_naive_ijk (~3.4 GFLOPS)
-|   [Linear Stride-1 access traversal]
-v
+   │   [Linear Stride-1 access traversal]
+   ▼
 02_loop_ikj (~42.9 GFLOPS)
-|   [L1/L2 Cache Tiling sub-blocks]
-v
+   │   [L1/L2 Cache Tiling sub-blocks]
+   ▼
 03_cache_tiling (~24.7 GFLOPS - Single-Core scalar/auto-vectorized)
-|   [AVX2 Micro-Kernel (4x8) + Memory Packing + OpenMP Multi-Core]
-v
+   │   [AVX2 Micro-Kernel (4x8) + Memory Packing + OpenMP Multi-Core]
+   ▼
 04_blis_avx2_openmp (> 170 GFLOPS)
-
+```
 
 ### Benchmark Summary ($N = 2048$, Single-Precision `float`)
 
