@@ -2,24 +2,23 @@
 A comprehensive repository covering theoretical foundations, hardware-aware optimizations, and parallel programming paradigms in modern High-Performance Computing.
 ---
 ## HPC Core Curriculum & Architecture Map
-
-              +----------------------------------------------+
-              |           HPC System Architecture            |
-              +----------------------┬-----------------------+
-                                     |
-    +--------------------------------┴-------------------------------+
-    |                                                                |
-+-------v-----------------------+               +------------------------v------+
-|       Shared Memory &         |               |     Distributed Systems &     |
-|       Node Architecture       |               |       Cluster Computing       |
+```text
+                  +-----------------------------------------------+
+                  |            HPC System Architecture            |
+                  +-----------------------┬-----------------------+
+                                          |
+        +---------------------------------+-------------------------------+
+        |                                                                 |
++-------v-----------------------+               +-------------------------v-----+
+|        Shared Memory &        |               |      Distributed Systems &    |
+|       Node Architecture       |               |        Cluster Computing      |
 +-------------------------------+               +-------------------------------+
 | * Cache & Memory Hierarchy    |               | * Message Passing (MPI)       |
 | * Instruction-Level (ILP/SIMD)|               | * Interconnects (InfiniBand)  |
 | * Multithreading (OpenMP)     |               | * Partitioning & Load Balance |
 | * Hardware Accelerators (GPU) |               | * Distributed Storage/I/O     |
 +-------------------------------+               +-------------------------------+
-
-
+```
 ---
 
 ## 1. Pillars of High-Performance Computing
