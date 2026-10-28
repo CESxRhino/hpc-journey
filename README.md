@@ -53,8 +53,8 @@ A comprehensive repository covering theoretical foundations, hardware-aware opti
 | Directory | Topic / Paradigm | Key Techniques Demonstrated | Status |
 | :--- | :--- | :--- | :---: |
 | `01-matrix-gemm-cpu/` | Memory & SIMD | Loop Reordering, Cache Tiling, AVX2 FMA Micro-Kernel, OpenMP | Completed |
-| `02-memory-roofline/` | Profiling & Limits | STREAM Benchmark, Hardware Prefetching, Empirical Roofline Analysis | In Progress |
-| `03-multithread-openmp/` | Shared Memory | False Sharing Detection, NUMA First-Touch, Dynamic Scheduling | Planned |
+| `02-memory-roofline/` | Profiling & Limits | STREAM Benchmark, Hardware Prefetching, Empirical Roofline Analysis | Completed |
+| `03-multithread-openmp/` | Shared Memory | False Sharing Detection, NUMA First-Touch, Dynamic Scheduling | In Progress |
 | `04-gpu-cuda-basics/` | Massively Parallel | Thread/Block Grids, Shared Memory Tiling, Memory Coalescing | Planned |
 | `05-distributed-mpi/` | Distributed Memory | Ghost Cell Exchange, Ring Topology Communication, Stencil Computation | Planned |
 
