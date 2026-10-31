@@ -1,150 +1,195 @@
-# HPC-Journey: Hardware-Aware Computing & Low-Level AI Systems
+# HPC-JOURNEY: HARDWARE-AWARE COMPUTING & LOW-LEVEL AI SYSTEMS
+====================================================================================================
+Language:        C++20 | ISO/IEC 14882:2020
+Target ISA:      x86-64-v3 (AVX2, FMA3, BMI2)
+Parallel Engine: OpenMP 4.5+ (POSIX Threads Backend)
+Environment:     Linux x86_64 (Bare-Metal / Ubuntu 22.04 LTS / WSL2)
+Toolchain:       GCC 11+ / Clang 14+ (-O3 -march=native -fopenmp)
+Author:          Le Cao Minh (HPC & AI Systems Engineering)
+Status:          Active Research & Engineering Artifacts
+====================================================================================================
 
-[![C++20](https://img.shields.io/badge/Language-C%2B%2B20-blue.svg)](https://en.cppreference.com/w/cpp/20)
-[![Instruction Set](https://img.shields.io/badge/ISA-x86--64--v3%20%7C%20AVX2%20%2B%20FMA3-orange.svg)]()
-[![OpenMP](https://img.shields.io/badge/Threading-OpenMP%204.5%2B-green.svg)](https://www.openmp.org/)
-[![License](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
-[![Academic Profile](https://img.shields.io/badge/Focus-HPC%20%26%20AI%20Systems-red.svg)]()
+> A rigorous systems engineering repository dedicated to the micro-architectural optimization
+> of compute-intensive kernels, analytical roofline modeling, cache-subsystem residency, and
+> shared-memory parallel runtimes built from first hardware principles.
 
-> A systems engineering repository systematically documenting the optimization of dense compute kernels, multi-level memory hierarchy modeling, and hardware-aware parallelism from first principles.
 
----
+----------------------------------------------------------------------------------------------------
+1. ARCHITECTURAL BLUEPRINT & SUB-SYSTEM CO-DESIGN
+----------------------------------------------------------------------------------------------------
 
-## 📌 Architectural Blueprint
+ +------------------------------------------------------------------------------------------------+
+ |                                    COMPUTATIONAL WORKLOAD                                      |
+ |            Dense Linear Algebra (GEMM)  |  IO-Aware Attention  |  Stencil Operators            |
+ +------------------------------------------------------------------------------------------------+
+                                                  │
+                                                  ▼
+ +------------------------------------------------------------------------------------------------+
+ |                                  ALGORITHMIC MEMORY ENGINE                                     |
+ |   * 2-Level Panel Packing: PackA (Mc x Kc -> L2), PackB (Kc x Nc -> L3/DRAM)                   |
+ |   * Cache Blocking: L1 Data Cache (32 KB), L2 Unified (512 KB), L3 Shared (16 MB)              |
+ |   * Data Alignment: 64-Byte Cache Line Boundaries (`alignas(64)`)                             |
+ +------------------------------------------------------------------------------------------------+
+                                                  │
+                                                  ▼
+ +------------------------------------------------------------------------------------------------+
+ |                                 INSTRUCTION-LEVEL PARALLELISM                                  |
+ |   * Explicit Vectorization: 256-bit AVX2 Intrinsics (`__m256`, 8-wide FP32)                   |
+ |   * Vector Compute Pipe: Fused Multiply-Add (FMA3: `_mm256_fmadd_ps`, Latency=4, Throughput=0.5)|
+ |   * Register Allocation: 6x16 Micro-Kernel pinning 12/16 `%ymm` registers as accumulators      |
+ |   * ILP Optimization: 4-way loop unrolling (`K_UNROLL = 4`) hiding pipeline dependency stalls  |
+ +------------------------------------------------------------------------------------------------+
+                                                  │
+                                                  ▼
+ +------------------------------------------------------------------------------------------------+
+ |                                    SHARED-MEMORY RUNTIME                                       |
+ |   * Hardware Thread Pinning: `OMP_PLACES=cores`, `OMP_PROC_BIND=close` (Anti-Migration)        |
+ |   * Coherence Management: Elimination of false sharing / MESI cross-core invalidation buses   |
+ |   * Load Distribution: Analytical comparison of `static`, `dynamic(chunk)`, and `guided`       |
+ |   * NUMA Topology: Verification of First-Touch page allocation on UMA vs Multi-Socket domains  |
+ +------------------------------------------------------------------------------------------------+
+                                                  │
+                                                  ▼
+ +------------------------------------------------------------------------------------------------+
+ |                                  PHYSICAL SILICON SUBSTRATE                                    |
+ |          AMD Zen Monolithic APU | 8 Cores / 16 Threads | Dual-Channel DDR4 @ 3200 MT/s         |
+ +------------------------------------------------------------------------------------------------+
 
-===================================================================================
-                             HPC & AI SYSTEMS RUNTIME
-===================================================================================
- [Algorithm Layer]       GEMM / BLAS-3         FlashAttention       Stencil/PDEs
-                               │                      │                   │
- ──────────────────────────────┼──────────────────────┼───────────────────┼────────
- [Optimization Engine]    Panel Packing        Shared Memory       Ghost Exchange
-                          Reg Tiling (6x16)    IO-Aware Tiling     Ring Topologies
-                               │                      │                   │
- ──────────────────────────────┼──────────────────────┼───────────────────┼────────
- [Execution Model]        AVX2 / FMA3             OpenMP            MPI / NCCL
-                          Vectorization        Thread Binding      Interconnect
-                               │                      │                   │
- ──────────────────────────────┼──────────────────────┼───────────────────┼────────
- [Hardware Substrate]     L1D/L2 Cache         MESI Coherence      NUMA / PCIe Bus
-                          (32KB / 512KB)       (64B Cache Line)    (Dual-Channel)
-===================================================================================
 
----
+----------------------------------------------------------------------------------------------------
+2. HOST HARDWARE TESTBED & MICRO-ARCHITECTURAL LIMITS
+----------------------------------------------------------------------------------------------------
 
-## 💻 Target System Specifications
+Empirical benchmarks, bandwidth saturation curves, and operational bounds are mapped directly
+against the physical specifications of the test execution node:
 
-All micro-benchmarks and roofline models are profiled on the following host environment:
+  Parameter                    Hardware Value                  Micro-architectural Significance
+  -------------------------    ----------------------------    ---------------------------------------
+  Micro-Architecture           AMD Zen Monolithic APU          Unified single-die core complex (CCX)
+  Topology                     8 Cores / 16 Threads (1 Socket) NUMA Nodes: 1 (UMA Monolithic Substrate)
+  Instruction Extensions       AVX2, FMA3, BMI2, CLFLUSHOPT    256-bit vector registers (%ymm0 - %ymm15)
+  Theoretical Peak (FP32)      1,553.60 GFLOPS                 8 cores * 2 FMA units * 8 FP32 * 4.8 GHz
+  L1 Data Cache (Private)      32 KB / core, 8-way assoc.      64-byte line, ~0.9 ns latency (~1.8 TB/s)
+  L2 Cache (Private)           512 KB / core, 8-way assoc.     Unified instruction/data, ~3.0 ns latency
+  L3 Cache (Shared)            16 MB monolithic, 16-way        Victim cache architecture across 8 cores
+  DRAM Physical Subsystem      DDR4-3200 MT/s Dual-Channel     128-bit bus width, theoretical 51.2 GB/s
+  Host OS / Kernel             Linux 6.x x86_64                Sub-millisecond high-resolution timers
 
-| Microarchitectural Parameter | Specification | Notes / Constraints |
-| :--- | :--- | :--- |
-| **Processor Model** | AMD Zen Architecture (8 Cores / 16 Threads) | Base 2.0 GHz, Boost up to 4.5 GHz |
-| **Instruction Extensions** | AVX2, FMA3, BMI2, SSE4.2 | 256-bit Vector Width (8-wide FP32) |
-| **Theoretical FP32 Peak** | **1,553.6 GFLOPS** | Dual FMA pipes @ Peak Boost |
-| **L1 Data Cache** | 32 KB / core, 8-way set associative | 64-byte line, ~0.9 ns latency |
-| **L2 Unified Cache** | 512 KB / core, 8-way set associative | ~3.0 ns latency |
-| **L3 Shared Cache** | 16 MB monolithic, 16-way set associative | Shared across 8 cores within CCX |
-| **DRAM Subsystem** | DDR4 Dual-Channel @ 3200 MT/s | Peak Bandwidth ~51.2 GB/s |
-| **OS & Toolchain** | Ubuntu Linux x86_64, GCC 11+ (`-O3 -march=native`) | Clang/LLVM validation available |
 
----
+----------------------------------------------------------------------------------------------------
+3. REPOSITORY DIRECTORY SCHEMA & MILESTONE ROADMAP
+----------------------------------------------------------------------------------------------------
 
-## 🔬 Repository Structure & Milestone Progress
+  Module Subdirectory         Technical Domain              Core Implementations             Status
+  -----------------------     ---------------------------   ------------------------------   ---------
+  01-matrix-gemm-cpu/         Compute Optimization & SIMD   BLIS 6x16, Packing, FMA3, OMP    COMPLETED
+  02-memory-roofline/         Profiling & Empirical Limits  STREAM Triad, CARM Formulation   COMPLETED
+  03-multithread-openmp/      Memory Subsystem & Coherence  False Sharing, UMA, Schedulers   COMPLETED
+  04-gpu-cuda-basics/         Massively Parallel SIMT       Shared Memory, Coalescing, GEMM  PLANNED
+  05-distributed-mpi/         Cluster & Distributed Scale   Non-blocking Halo, Ghost Cell    PLANNED
 
-.
-├── 01-matrix-gemm-cpu/          # BLIS-like GEMM micro-kernel, packing, AVX2 FMA
-├── 02-memory-roofline/          # Cache-Aware Roofline Model (CARM), STREAM benchmark
-├── 03-multithread-openmp/       # False sharing, NUMA first-touch, workload scheduling
-├── 04-gpu-cuda-basics/          # [Planned] CUDA GEMM, shared memory tiling, coalescing
-└── 05-distributed-mpi/          # [Planned] Domain decomposition, non-blocking MPI
 
-| Sub-System | Domain | Optimization Primitives Demonstrated | Status |
-| :--- | :--- | :--- | :---: |
-| **`01-matrix-gemm-cpu`** | Compute Core | 2-level panel packing, 6x16 register blocking, FMA unrolling | `Completed` |
-| **`02-memory-roofline`** | Limits Analysis | STREAM triad, cache-aware operational intensity, CARM bounds | `Completed` |
-| **`03-multithread-openmp`** | Memory Subsystem | Cache line padding (`alignas(64)`), UMA profiling, dynamic chunks | `Completed` |
-| **`04-gpu-cuda-basics`** | SIMT Accelerators | Block tiling, bank conflicts, memory coalescing, warp divergence | `Planned` |
-| **`05-distributed-mpi`** | Distributed Scale | Point-to-point non-blocking routines, collective reduction | `Planned` |
+----------------------------------------------------------------------------------------------------
+4. EXPERIMENTAL CASE STUDIES & QUANTITATIVE RESULTS
+----------------------------------------------------------------------------------------------------
 
----
+### CASE STUDY 01: PROGRESSION OF SINGLE-PRECISION GEMM (FP32, N = 2016)
+Workload Complexity: 2 * N^3 = 1.638 x 10^10 FLOPs (16.38 GFLOPs)
 
-## 📊 Key Case Studies & Benchmark Metrics
+  Implementation Step             Latency    Throughput      Speedup   Arithmetic Intensity   Regime
+  ----------------------------   ---------   ------------   --------   --------------------   --------------
+  [01] Naive (i-j-k scalar)      1320.9 ms     12.4 GFLOPS      1.0x         0.25 FLOPs/B     DRAM Bound
+  [02] Tiled GEMM (L2/L3 cache)   148.9 ms    110.0 GFLOPS      8.9x         4.00 FLOPs/B     L3 Latency
+  [03] AVX2 Naive (Vectorized)     66.8 ms    245.0 GFLOPS     19.8x        16.00 FLOPs/B     L2 Bandwidth
+  [04] BLIS 6x16 Micro-Kernel      32.08 ms   510.8 GFLOPS     41.2x       ~336.00 FLOPs/B     COMPUTE BOUND
 
-### 1. General Matrix Multiply (GEMM FP32, N = 2016)
-Evolutionary progression of a single-precision matrix product (C = A * B + C) from un-vectorized baseline to a compute-bound micro-kernel:
+  Execution Scaling Analysis:
+  - Single-Core Vectorized BLIS:  71.00 GFLOPS
+  - 8-Core OpenMP Parallel BLIS: 510.76 GFLOPS
+  - Multi-Core Scaling Efficiency: 89.92% (Linear scaling against memory-wall constraints)
 
-12.4 GFLOPS  ──►  110.0 GFLOPS  ──►  245.0 GFLOPS  ──►  510.8 GFLOPS
-[Naive IJK]       [L2/L3 Tiled]       [AVX2 Naive]       [BLIS 6x16 + OpenMP]
 
-| Implementation | Architectural Optimization | Latency | GFLOPS | Arithmetic Intensity | Bottleneck Regime |
-| :--- | :--- | :---: | :---: | :---: | :---: |
-| `01_naive_ijk` | Stride-N memory access, scalar arithmetic | ~1320 ms | 12.4 | 0.25 FLOP/B | DRAM Bandwidth |
-| `02_tiled_gemm` | Sub-matrix blocking fitting L2/L3 cache | ~149 ms | 110.0 | 4.0 FLOP/B | L3 Latency Bound |
-| `03_avx2_naive` | Vectorized loop, unaligned strided vector loads | ~67 ms | 245.0 | 16.0 FLOP/B | L2 Bandwidth Bound |
-| **`04_blis_6x16`** | **Panel Packing + 12x %ymm Accumulators + OpenMP** | **32.08 ms** | **510.8** | **~336.0 FLOP/B** | **Compute Plateau** |
+### CASE STUDY 02: OPENMP ARCHITECTURAL MICRO-BENCHMARKS (`03-multithread-openmp/`)
 
-*Core Takeaway:* By pre-packing matrices A and B into continuous, aligned buffers and keeping intermediate values in 12 hardware vector registers (6 x 16 tile), TLB and cache thrashing were eliminated, resulting in an **89.9% parallel scaling efficiency** across 8 physical cores.
+  [A] False Sharing & Hardware Cache Invalidation (`01_false_sharing.cpp`)
+  - Target: 8 threads concurrently updating contiguous 64-bit accumulators over 500M iterations.
+  - Baseline (No Padding):       0.4986 ms  --> Extreme MESI invalidation bus traffic / core stalls.
+  - Optimized (`alignas(64)`):   0.0049 ms  --> Complete L1D cache-line isolation per physical core.
+  - Speedup Delta:               101.57x Performance Recovery.
 
----
+  [B] First-Touch Memory Allocation Policy (`02_numa_first_touch.cpp`)
+  - Target: Streaming read-write transformation across a 512 MB single-precision array.
+  - Serial Page Initialization:   365.41 ms
+  - Parallel Page Initialization: 366.85 ms
+  - Relative Variance:           -0.39% (Statistically indistinguishable).
+  - Architectural Takeaway: Confirms hardware substrate is a unified UMA architecture with
+    symmetric interconnect latency across all cores to the memory controller.
 
-### 2. Multi-threaded Architecture Benchmarks (`03-multithread-openmp`)
+  [C] Workload Imbalance & Runtime Dispatch Overhead (`03_scheduling_overhead.cpp`)
+  - Target: Quadratically skewed execution loop O(i^2) across 20,000 tasks.
+  - `schedule(static)`:          0.2223 ms  --> Thread 0-6 stall at barrier waiting for Thread 7.
+  - `schedule(dynamic, 1)`:      0.4825 ms  --> Atomic centralized queue contention thrashing.
+  - `schedule(dynamic, 16)`:     0.0395 ms  --> Chunk amortization begins to hide queue latency.
+  - `schedule(dynamic, 64)`:     0.0196 ms  --> OPTIMAL: 11.3x faster than static scheduling.
 
-#### A. False Sharing & MESI Coherence Contention
-* **Observation:** When 8 threads concurrently increment contiguous 8-byte counters, the cores repeatedly invalidate each other's L1 Data Cache lines via bus traffic.
-* **Resolution:** Applied `alignas(64)` padding to guarantee each counter occupies a dedicated cache line.
-* **Result:** Execution latency dropped from **`0.4986 ms`** to **`0.0049 ms`** (**101.57x Speedup**).
 
-#### B. First-Touch Policy on Monolithic APUs
-* **Observation:** Evaluating serial vs. parallel first-touch on a 512 MB buffer revealed negligible variance (**`-0.39%`**).
-* **Architectural Insight:** Confirms that the host processor functions as an **UMA (Uniform Memory Access)** monolithic die, where all 8 cores access the integrated memory controller (IMC) with symmetric latency.
+----------------------------------------------------------------------------------------------------
+5. REPRODUCTION & BUILD INSTRUCTIONS
+----------------------------------------------------------------------------------------------------
 
-#### C. Scheduling Overheads under Workload Skew (N = 20,000)
-* **Observation:** Evaluating scheduling strategies on quadratic computational load imbalance (O(i^2)):
-  * `schedule(static)`: **`0.2223 ms`** (Early-finishing threads stalled at barrier).
-  * `schedule(dynamic, 1)`: **`0.4825 ms`** (Devastating atomic queue lock contention).
-  * `schedule(dynamic, 64)`: **`0.0196 ms`** (**11.3x speedup vs. static**, balancing load with minimal queue overhead).
+Prerequisites:
+  - Linux x86_64 host environment (WSL2 or Bare-Metal Ubuntu recommended)
+  - GCC 11+ with AVX2/FMA flags supported by host CPU (`flags: avx2 fma`)
+  - GNU Make utility
 
----
+Build & Execution Commands:
 
-## 🛠️ Build and Reproduction
+  # 1. Clone repository
+  $ git clone https://github.com/<your-username>/HPC-Journey.git
+  $ cd HPC-Journey
 
-### Prerequisites
-* GCC 11+ or Clang 14+ with OpenMP and AVX2 support
-* GNU Make 4.x
-* Linux Environment (x86_64)
+  # 2. Compile and execute compute-bound BLIS GEMM benchmark
+  $ g++ -O3 -mavx2 -mfma -fopenmp -march=native \
+        01-matrix-gemm-cpu/gemm_refactor.cpp -o gemm_bench
+  $ OMP_PLACES=cores OMP_PROC_BIND=close ./gemm_bench
 
-### Reproducing Benchmarks
+  # 3. Compile and execute memory subsystem validation suite
+  $ cd 03-multithread-openmp
+  $ make all
+  $ ./01_false_sharing
+  $ ./02_numa_first_touch
+  $ ./03_scheduling_overhead
 
-```bash
-# 1. Clone repository
-git clone [https://github.com/](https://github.com/)<your-username>/HPC-Journey.git
-cd HPC-Journey
 
-# 2. Build and run BLIS GEMM micro-kernel
-g++ -O3 -mavx2 -mfma -fopenmp -march=native \
-    01-matrix-gemm-cpu/gemm_refactor.cpp -o gemm_bench
-./gemm_bench
+----------------------------------------------------------------------------------------------------
+6. PRIMARY ACADEMIC & TECHNICAL REFERENCES
+----------------------------------------------------------------------------------------------------
 
-# 3. Build and profile OpenMP architectural suite
-cd 03-multithread-openmp
-make all
-./01_false_sharing
-./02_numa_first_touch
-./03_scheduling_overhead
-```
-### Selected References & Foundations
-Systems Architecture & Micro-benchmarking
+[1] Computer Systems Architecture:
+    Bryant, R. E., & O'Hallaron, D. R.
+    "Computer Systems: A Programmer's Perspective (CS:APP)", 3rd Edition.
+    Pearson / Carnegie Mellon University (CS 15-213).
 
-    Bryant, R. E., & O'Hallaron, D. R. Computer Systems: A Programmer's Perspective (CS:APP 15-213). Carnegie Mellon University.
+[2] Operational Intensity & Cache Limits:
+    Williams, S., Waterman, A., & Patterson, D. (2009).
+    "Roofline: An Insightful Visual Performance Model for Multicore Architectures".
+    Communications of the ACM (CACM), 52(4), 65-76.
 
-    Williams, S., Waterman, A., & Patterson, D. Roofline: An Insightful Visual Performance Model for Multicore Architectures. CACM, 2009.
+[3] Matrix Multiplication Frameworks (BLIS / GotoBLAS):
+    Goto, K., & van de Geijn, R. A. (2008).
+    "Anatomy of High-Performance Matrix Multiplication".
+    ACM Transactions on Mathematical Software (TOMS), 34(3), 1-25.
 
-    Hennessy, J. L., & Patterson, D. A. Computer Architecture: A Quantitative Approach, 6th Edition.
+[4] Modern Memory-Efficient AI Kernels:
+    Dao, T., Fu, D. Y., Ermon, S., Rudra, A., & Re, C. (2022).
+    "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness".
+    Advances in Neural Information Processing Systems (NeurIPS 2022).
 
-High-Performance BLAS & Operator Design
+[5] High-Performance Shared Memory Parallelism:
+    van der Pas, R., Stotzer, E., & Terboven, C. (2017).
+    "Using OpenMP -- The Next Step: High-Performance Simplicity".
+    The MIT Press.
 
-    Goto, K., & van de Geijn, R. A. Anatomy of High-Performance Matrix Multiplication. ACM TOMS, 2008.
-
-    Van Zee, F. G., & van de Geijn, R. A. BLIS: A Framework for Rapidly Instantiating BLAS Functionality. ACM TOMS, 2015.
-
-    Dao, T., et al. FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness. NeurIPS 2022.
+====================================================================================================
+End of File
+====================================================================================================
