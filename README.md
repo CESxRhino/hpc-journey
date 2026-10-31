@@ -12,9 +12,8 @@
 * **Hardware Limit Profiling:** Profiled multi-level cache and DRAM bandwidth ceilings to construct empirical Cache-Aware Roofline Models (CARM).
 
 ---
-```text
 ## Architecture Blueprint
-
+```text
 +---------------------------------------------------------------------------------------+
 |                                COMPUTATIONAL WORKLOAD                                 |
 |          Dense Linear Algebra (GEMM)  |  IO-Aware Tiling  |  Stencil Operators        |
