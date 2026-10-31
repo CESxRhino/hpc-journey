@@ -12,8 +12,9 @@
 * **Hardware Limit Profiling:** Profiled multi-level cache and DRAM bandwidth ceilings to construct empirical Cache-Aware Roofline Models (CARM).
 
 ---
+
 ## Architecture Blueprint
-```text
+
 +---------------------------------------------------------------------------------------+
 |                                COMPUTATIONAL WORKLOAD                                 |
 |          Dense Linear Algebra (GEMM)  |  IO-Aware Tiling  |  Stencil Operators        |
@@ -43,7 +44,7 @@
 |   * Work Scheduling       : Dynamic chunk dispatch against quadratic workload skew    |
 |   * Topology Verification : UMA monolithic validation on unified memory controller    |
 +---------------------------------------------------------------------------------------+
-```
+
 ---
 
 ## Testbed Specifications
@@ -62,7 +63,22 @@
 
 ## Benchmark Results & Case Studies
 
-### 1. Empirical Cache-Aware Roofline Model (`02-memory-roofline/`)
+### 1. General Matrix Multiplication (`01-matrix-gemm-cpu/`, FP32, N = 2016)
+Workload complexity: $2 \times N^3 \approx 16.38\text{ GFLOPs}$.
+
+| Implementation Source File | Core Optimization Primitives | Latency | Throughput | Speedup | Regime |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| `01_naiveijk.cpp` | Stride-$N$ memory access, scalar arithmetic | 1320.9 ms | 12.4 GFLOPS | 1.0x | DRAM Bound |
+| `02_optikj.cpp` | Loop interchange ($i$-$k$-$j$) for sequential reads | 425.2 ms | 38.5 GFLOPS | 3.1x | Cache-Miss Reduction |
+| `03_cachetilling.cpp` | Hierarchical 3-level cache blocking ($M_c, N_c, K_c$) | 148.9 ms | 110.0 GFLOPS | 8.9x | L3 Latency Bound |
+| `04_micro_kenel.cpp` | AVX2 + FMA3 vectorization, unaligned loads | 66.8 ms | 245.0 GFLOPS | 19.8x | L2 Bandwidth Bound |
+| **`05_blis_packed_complete.cpp`** | **2-Level Packing + 6x16 Register Tiling + OpenMP** | **32.08 ms** | **510.8 GFLOPS** | **41.2x** | **Compute Plateau** |
+
+> **Analysis:** Partitioning the computation into an optimized $6 \times 16$ register tile retains intermediate accumulations across 12 dedicated `%ymm` registers. Coupled with 2-level contiguous buffer packing ($A$ panel to L2, $B$ panel to L3), this approach eliminates capacity/conflict cache misses and TLB paging stalls, driving throughput directly into the compute-bound plateau.
+
+---
+
+### 2. Empirical Cache-Aware Roofline Model (`02-memory-roofline/`)
 Using `benchmark_roofline.cpp` and `plot.py`, multi-level memory throughput is empirically characterized across cache and main memory boundaries.
 
 | Memory Hierarchy Level | Sustained Bandwidth | Latency | Operational Intensity Ridge Point |
@@ -77,20 +93,6 @@ Using `benchmark_roofline.cpp` and `plot.py`, multi-level memory throughput is e
 </p>
 
 > **Roofline Analysis:** Kernel execution with arithmetic intensity below **~40.5 FLOPs/Byte** is strictly bounded by DRAM bandwidth. By adopting register tiling ($6 \times 16$) and 2-level contiguous buffer packing, GEMM operational intensity jumps from **0.25 FLOP/Byte** to **~336.0 FLOP/Byte**, shifting the workload into the compute-bound plateau.
-
----
-
-### 2. General Matrix Multiplication (GEMM FP32, N = 2016)
-Workload complexity: $2 \times N^3 \approx 16.38\text{ GFLOPs}$.
-
-| Implementation Stage | Core Optimization Primitives | Latency | Throughput | Speedup | Regime |
-| :--- | :--- | :---: | :---: | :---: | :---: |
-| `01_naive_ijk` | Stride-$N$ memory traversal, scalar | 1320.9 ms | 12.4 GFLOPS | 1.0x | DRAM Bound |
-| `02_tiled_gemm` | Hierarchical blocking for L2/L3 residency | 148.9 ms | 110.0 GFLOPS | 8.9x | L3 Latency Bound |
-| `03_avx2_naive` | Vectorized loop, unaligned strided loads | 66.8 ms | 245.0 GFLOPS | 19.8x | L2 Bandwidth Bound |
-| **`04_blis_6x16`** | **2-Level Packing + 6x16 Register Tiling + OpenMP** | **32.08 ms** | **510.8 GFLOPS** | **41.2x** | **Compute Plateau** |
-
-> **Analysis:** Partitioning the computation into an optimized $6 \times 16$ register tile retains intermediate accumulations across 12 dedicated `%ymm` registers. Coupled with 2-level contiguous buffer packing ($A$ panel to L2, $B$ panel to L3), this approach completely eliminates capacity/conflict cache misses and TLB paging stalls, driving throughput directly into the compute-bound plateau.
 
 ---
 
@@ -118,20 +120,19 @@ Workload complexity: $2 \times N^3 \approx 16.38\text{ GFLOPs}$.
 $ git clone https://github.com/<your-username>/HPC-Journey.git
 $ cd HPC-Journey
 
-# 1. Profile empirical Roofline model and generate plots
-$ cd 02-memory-roofline
+# 1. Build and run CPU GEMM optimization stages
+$ cd 01-matrix-gemm-cpu
+$ g++ -O3 -mavx2 -mfma -fopenmp -march=native 05_blis_packed_complete.cpp -o blis_bench
+$ OMP_PLACES=cores OMP_PROC_BIND=close ./blis_bench
+
+# 2. Profile empirical Roofline model and generate plots
+$ cd ../02-memory-roofline
 $ g++ -O3 -mavx2 -fopenmp -march=native benchmark_roofline.cpp -o benchmark_roofline
 $ ./benchmark_roofline
 $ python3 plot.py
 
-# 2. Build and execute compute-bound BLIS GEMM benchmark
-$ cd ../
-$ g++ -O3 -mavx2 -mfma -fopenmp -march=native \
-      01-matrix-gemm-cpu/gemm_refactor.cpp -o gemm_bench
-$ OMP_PLACES=cores OMP_PROC_BIND=close ./gemm_bench
-
 # 3. Build and execute OpenMP micro-architectural suite
-$ cd 03-multithread-openmp && make all
+$ cd ../03-multithread-openmp && make all
 $ ./01_false_sharing
 $ ./02_numa_first_touch
 $ ./03_scheduling_overhead
