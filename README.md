@@ -14,7 +14,7 @@
 ---
 
 ## Architecture Blueprint
-
+```text
 +---------------------------------------------------------------------------------------+
 |                                COMPUTATIONAL WORKLOAD                                 |
 |          Dense Linear Algebra (GEMM)  |  IO-Aware Tiling  |  Stencil Operators        |
@@ -44,7 +44,7 @@
 |   * Work Scheduling       : Dynamic chunk dispatch against quadratic workload skew    |
 |   * Topology Verification : UMA monolithic validation on unified memory controller    |
 +---------------------------------------------------------------------------------------+
-
+```
 ---
 
 ## Testbed Specifications
