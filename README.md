@@ -12,7 +12,7 @@
 * **Hardware Limit Profiling:** Profiled multi-level cache and DRAM bandwidth ceilings to construct empirical Cache-Aware Roofline Models (CARM).
 
 ---
-
+```text
 ## Architecture Blueprint
 
 +---------------------------------------------------------------------------------------+
@@ -44,7 +44,7 @@
 |   * Work Scheduling       : Dynamic chunk dispatch against quadratic workload skew    |
 |   * Topology Verification : UMA monolithic validation on unified memory controller    |
 +---------------------------------------------------------------------------------------+
-
+```
 ---
 
 ## Testbed Specifications
