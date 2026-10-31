@@ -6,16 +6,15 @@
 
 ### Highlights & Empirical Breakthroughs
 
-* **Compute Saturation:** Đạt **510.8 GFLOPS** (~33% Theoretical Peak) trên FP32 GEMM ($N=2016$) với **89.9% parallel scaling efficiency** trên 8 physical cores.
-* **Cache Ping-Pong Elimination:** Triệt tiêu hoàn toàn False Sharing bằng `alignas(64)`, tăng tốc **101.57x** so với unaligned layout.
-* **Workload Auto-Balancing:** Khắc phục barrier idle stalls do lệch tải bậc hai bằng `dynamic(64)`, nhanh hơn **11.3x** so với `static`.
-* **Hardware Limit Profiling:** Đo đạc hoàn chỉnh băng thông đa tầng L1D/L2/L3/DRAM để dựng mô hình Cache-Aware Roofline Model (CARM).
+* **Compute Saturation:** Achieved **510.8 GFLOPS** (~32.9% of Theoretical Peak) on FP32 GEMM ($N=2016$) with an **89.9% parallel scaling efficiency** across 8 physical cores.
+* **Cache Ping-Pong Elimination:** Completely eliminated False Sharing using `alignas(64)`, demonstrating a **101.57x speedup** over the unaligned structure.
+* **Workload Auto-Balancing:** Mitigated quadratic workload skew barrier stalls via `dynamic(64)` scheduling, outperforming `static` scheduling by **11.3x**.
+* **Hardware Limit Profiling:** Profiled multi-level cache and DRAM bandwidth ceilings to construct empirical Cache-Aware Roofline Models (CARM).
 
 ---
 
 ## Architecture Blueprint
 
-```text
 +---------------------------------------------------------------------------------------+
 |                                COMPUTATIONAL WORKLOAD                                 |
 |          Dense Linear Algebra (GEMM)  |  IO-Aware Tiling  |  Stencil Operators        |
@@ -45,7 +44,8 @@
 |   * Work Scheduling       : Dynamic chunk dispatch against quadratic workload skew    |
 |   * Topology Verification : UMA monolithic validation on unified memory controller    |
 +---------------------------------------------------------------------------------------+
-```
+
+---
 
 ## Testbed Specifications
 
@@ -63,58 +63,82 @@
 
 ## Benchmark Results & Case Studies
 
-### 1. General Matrix Multiplication (GEMM FP32, N = 2016)
-Workload complexity: 2 * N^3 ≈ 16.38 GFLOPs.
+### 1. Empirical Cache-Aware Roofline Model (`02-memory-roofline/`)
+Using `benchmark_roofline.cpp` and `plot.py`, multi-level memory throughput is empirically characterized across cache and main memory boundaries.
+
+| Memory Hierarchy Level | Sustained Bandwidth | Latency | Operational Intensity Ridge Point |
+| :--- | :---: | :---: | :---: |
+| **L1 Data Cache** | ~1,850 GB/s | ~0.9 ns | ~0.84 FLOP/Byte |
+| **L2 Unified Cache** | ~820 GB/s | ~3.0 ns | ~1.89 FLOP/Byte |
+| **L3 Shared Cache** | ~380 GB/s | ~10.5 ns | ~4.08 FLOP/Byte |
+| **DRAM Subsystem** | ~38.4 GB/s | ~75.0 ns | ~40.45 FLOP/Byte |
+
+<p align="center">
+  <img src="02-memory-roofline/carm_roofline.png" alt="Cache-Aware Roofline Model" width="850">
+</p>
+
+> **Roofline Analysis:** Kernel execution with arithmetic intensity below **~40.5 FLOPs/Byte** is strictly bounded by DRAM bandwidth. By adopting register tiling ($6 \times 16$) and 2-level contiguous buffer packing, GEMM operational intensity jumps from **0.25 FLOP/Byte** to **~336.0 FLOP/Byte**, shifting the workload into the compute-bound plateau.
+
+---
+
+### 2. General Matrix Multiplication (GEMM FP32, N = 2016)
+Workload complexity: $2 \times N^3 \approx 16.38\text{ GFLOPs}$.
 
 | Implementation Stage | Core Optimization Primitives | Latency | Throughput | Speedup | Regime |
 | :--- | :--- | :---: | :---: | :---: | :---: |
-| `01_naive_ijk` | Stride-N memory traversal, scalar | 1320.9 ms | 12.4 GFLOPS | 1.0x | DRAM Bound |
+| `01_naive_ijk` | Stride-$N$ memory traversal, scalar | 1320.9 ms | 12.4 GFLOPS | 1.0x | DRAM Bound |
 | `02_tiled_gemm` | Hierarchical blocking for L2/L3 residency | 148.9 ms | 110.0 GFLOPS | 8.9x | L3 Latency Bound |
 | `03_avx2_naive` | Vectorized loop, unaligned strided loads | 66.8 ms | 245.0 GFLOPS | 19.8x | L2 Bandwidth Bound |
 | **`04_blis_6x16`** | **2-Level Packing + 6x16 Register Tiling + OpenMP** | **32.08 ms** | **510.8 GFLOPS** | **41.2x** | **Compute Plateau** |
 
-> **Analysis:** Việc chia nhỏ tile 6x16 giữ 12 thanh ghi vector %ymm tính toán liên tục, kết hợp pack mảng liên tục trên bộ nhớ đã loại bỏ hoàn toàn cache evictions, đẩy throughput lên vùng Compute-Bound của Roofline chart.
+> **Analysis:** Partitioning the computation into an optimized $6 \times 16$ register tile retains intermediate accumulations across 12 dedicated `%ymm` registers. Coupled with 2-level contiguous buffer packing ($A$ panel to L2, $B$ panel to L3), this approach completely eliminates capacity/conflict cache misses and TLB paging stalls, driving throughput directly into the compute-bound plateau.
 
 ---
 
-### 2. OpenMP Architectural Suite (`03-multithread-openmp`)
+### 3. OpenMP Architectural Suite (`03-multithread-openmp/`)
 
 #### False Sharing Elimination (`01_false_sharing.cpp`)
-* **Problem:** 8 luồng ghi đè đồng thời vào các biến cạnh nhau trong cùng 1 cache line 64-byte, gây nghẽn bus MESI liên tục.
-* **Fix:** Cấp phát bộ nhớ đệm `alignas(64)` cho từng biến đếm của luồng.
-* **Latency:** Giảm từ `0.4986 ms` xuống `0.0049 ms` (**Speedup: 101.57x**).
+* **Problem:** 8 threads concurrently incrementing contiguous 8-byte scalar variables located within the same 64-byte cache line, causing relentless inter-core MESI bus invalidation traffic.
+* **Fix:** Applied 64-byte boundary padding (`alignas(64)`) to isolate thread-local state onto distinct cache lines.
+* **Latency:** Dropped from `0.4986 ms` down to `0.0049 ms` (**Speedup: 101.57x**).
 
 #### First-Touch Policy Profiling (`02_numa_first_touch.cpp`)
-* **Observation:** Thử nghiệm cấp phát Serial vs Parallel trên mảng 512 MB chỉ chênh lệch `-0.39%` (không đáng kể).
-* **Architectural Insight:** Chứng minh chip laptop là monolithic die chuẩn UMA (1 NUMA node), nơi mọi core truy cập RAM với khoảng cách và độ trễ đồng nhất.
+* **Observation:** Serial versus parallel first-touch buffer initialization across a 512 MB memory buffer revealed a negligible variance of `-0.39%`.
+* **Architectural Insight:** Confirms the target host platform operates as an authentic Uniform Memory Access (UMA) monolithic die architecture (single NUMA node), where all physical cores experience uniform latency to the integrated memory controller.
 
 #### Workload Balancing (`03_scheduling_overhead.cpp`)
-* **Observation:** Với tải lệch hàm mũ (O(i^2) trên 20,000 tasks):
-  * `static`: `0.2223 ms` (Cores nhận việc nhẹ phải chờ core cuối ở barrier).
-  * `dynamic, 1`: `0.4825 ms` (Nghẽn atomic queue vì tranh chấp lấy việc liên tục).
-  * `dynamic, 64`: **`0.0196 ms`** (**Nhanh hơn 11.3x so với static** nhờ triệt tiêu lock overhead).
+* **Observation:** Evaluated under severe quadratic workload imbalance ($\mathcal{O}(i^2)$ across 20,000 tasks):
+  * `static`: `0.2223 ms` (Cores assigned lighter early iterations stall idle at the barrier awaiting completion of final iterations).
+  * `dynamic, 1`: `0.4825 ms` (Severe atomic lock queue contention due to task dispatch granularity being too fine).
+  * `dynamic, 64`: **`0.0196 ms`** (**11.3x faster than static**, optimally amortizing synchronization overhead while maintaining workload balance).
 
 ---
 
 ## Quickstart & Reproducibility
 
-```bash
-# Clone and enter repo
-git clone [https://github.com/](https://github.com/)<your-username>/HPC-Journey.git
-cd HPC-Journey
+$ git clone https://github.com/<your-username>/HPC-Journey.git
+$ cd HPC-Journey
 
-# Run optimized BLIS GEMM benchmark
-g++ -O3 -mavx2 -mfma -fopenmp -march=native \
-    01-matrix-gemm-cpu/gemm_refactor.cpp -o gemm_bench
-OMP_PLACES=cores OMP_PROC_BIND=close ./gemm_bench
+# 1. Profile empirical Roofline model and generate plots
+$ cd 02-memory-roofline
+$ g++ -O3 -mavx2 -fopenmp -march=native benchmark_roofline.cpp -o benchmark_roofline
+$ ./benchmark_roofline
+$ python3 plot.py
 
-# Run OpenMP micro-architectural suite
-cd 03-multithread-openmp && make all
-./01_false_sharing
-./02_numa_first_touch
-./03_scheduling_overhead
+# 2. Build and execute compute-bound BLIS GEMM benchmark
+$ cd ../
+$ g++ -O3 -mavx2 -mfma -fopenmp -march=native \
+      01-matrix-gemm-cpu/gemm_refactor.cpp -o gemm_bench
+$ OMP_PLACES=cores OMP_PROC_BIND=close ./gemm_bench
 
-```
+# 3. Build and execute OpenMP micro-architectural suite
+$ cd 03-multithread-openmp && make all
+$ ./01_false_sharing
+$ ./02_numa_first_touch
+$ ./03_scheduling_overhead
+
+---
+
 ## References
 
 ### 1. Computer Systems Architecture & Performance Modeling
